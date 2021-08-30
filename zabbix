@@ -1,0 +1,117 @@
+# -zabbbix
+网站：https://www.zabbix.com/documentation/5.0/zh/manual/installation/install_from_packages/rhel_centos
+选择源码安装
+1 下载源代码存档下的转到 Zabbix download page，点击
+点击Zabbix Packages
+选择5.0LTS  CentOS  7 Mysql Apache
+
+
+~# rpm -Uvh https://repo.zabbix.com/zabbix/5.0/rhel/7/x86_64/zabbix-release-5.0-1.el7.noarch.rpm
+~# yum clean all
+
+~# yum install zabbix-server-mysql zabbix-agent    %%一般在此出现错误([Errn0 256] No more mirrors to try),百度搜索aliyun镜像源，进入再搜索zabbix,点击下载地址
+~# cat /etc/yum.repos.d/zabbix.repo                %%可以查看baseurl=http://repo.zabbix.com/... 与12行下载地址的页面其实内容是一样的
+~# vi  /etc/yum.repos.d/zabbix.repo                %%将12行baseurl=后面的路径改成baseurl=https://mirrors.aliyun.com/zabbix/zabbix/5.0/rhel/7/$basearch/
+~# yum clean all
+~# yum install zabbix-server-mysql                 %%应该没问题了
+~# yum install centos-release-scl
+~# yum install zabbix-nginx-conf-scl -y
+~# vi  /etc/yum.repos.d/zabbix.repo                
+把[zabbix-frontend]   ...  enabled=1  ...
+~# yum install zabbix-web-mysql-scl zabbix-apache-conf-scl
+~# echo $?                                         %%看看有没有报错
+
+
+(mysql试了无数次方法，终究还是失败)
+接下来创建初始数据库
+~# mysql                                           %%可以查下，装没装mysql数据库
+~# yum install mysql                               %%注意此时mysql版本5.5，太低了。不建议用
+于是换种方法，装高点儿的版本，于是去mysql的官网找  %%官网 dev.mysql.com
+~# cd /tmp/
+tmp# wget https://cdn.mysql.com/archives/mysql-5.7/mysql-5.7.30-linux-glibc2.12-x86_64.tar.gz
+tmp# tar -zxvf mysql-5.7.30-linux-glibc2.12-x86_64.tar.gz
+
+此时mysql需要初始化一下，网址https://dev.mysql.com/doc/refman/5.7/en/binary-installation.html
+tmp# yum install libaio
+接下来，需要mysql的配置文件
+tmp# vi /etc/my.cnf                                  %%将之前的配置文件都注释，用#注释起来，复制粘贴文本。记得配置文件中de路径都是 /data/mysql/data/  下
+tmp# groupadd mysql
+tmp# useradd -r -g mysql -s /bin/false mysql
+tmp# cd /usr/local
+local# ls /tmp/                                      %%查找mysql-5.7.30-linux-glibc2.12-x86_64
+local# mv /tmp/mysql-5.7.30-linux-glibc2.12-x86_64 /usr/local/mysql
+local# ls /usr/local/mysql/
+local# mkdir /data/mysql/ -p
+local# chown -R mysql.mysql /usr/local/mysql/ /data/mysql/
+local# cd  /usr/local/mysql/
+mysql# ./bin/mysqld --initialize --user=mysql        %%./bin/mysqld --initialize --user=mysql^C 表示初始化完结束，不用看初始化数据
+mysql# cd
+~# rm
+
+
+##配置数据库
+~# yum install mariadb-server -y
+~# systemctl start mariadb
+~# netstat -lntup  #查看端口3306
+~# mysql
+     mariaDB>create database zabbix character set utf8 collate utf8_bin;
+     mariaDB  [(none)]> show database;
+     mariaDB  [(none)]> exit
+~# rpm -ql zabbix-server-mysql   #查看/usr/share/doc/zabbix-server-mysql-5.0.14/create.sql.gz初始化数据库
+~# zcat /usr/share/doc/zabbix-server-mysql-5.0.14/create.sql.gz >zabbix.sql
+~# vi zabbix.sql  
+##开头加USE zabbix;(很重要)
+~# mysql <zabbix.sql
+~# mysql
+     mariaDB[(none)]>use zabbix
+     MariaDB [zabbix]> show tables;
+     MariaDB [zabbix]>exit;
+~# mysql
+     mariaDB[(none)]>grant all on zabbix.* to zabbix@192.168.163.133 identified by 'zabbix';  #（当前的ip）
+     mariaDB[(none)]>exit;
+
+
+##配置服务端环境
+~# vi /etc/zabbix/zabbix_server.conf #把#DBPassword改成DBPassword=zabbix  DBPort=3306  DBListen =192.168.163.133
+~# cd /etc/opt/rh/
+
+##配置PHP
+rh# cd ./rh-php72
+rh-php72# vi ./php-fpm.d/zabbix.conf  #把listen.acl_users = apache改成listen.acl_users = apache,nginx  php_value[date.timezone] = Asia/Shanghai
+rh-php72# cd ..
+rh# cd ./rh-nginx116 
+rh-nginx116# cd nginx
+
+##配置Nginx
+nginx# vi ./conf.d/zabbix.conf    #把#listen改成listen  ,把#server_name  eaxmple name  改成  server_name  192.168.163.133(我的虚拟机ip )
+nginx# systemctl status firewalld   #查看防火墙状态
+nginx# systemctl stop  firewalld
+nginx# systemctl disable firewalld
+nginx# getenforce
+nginx# setenforce 0
+
+##重启服务
+nginx# vi /etc/selinux/config #把SELINUX=enforcing  改成   SELINUX = disabled
+nginx# systemctl start zabbix-server.service rh-php72-php-fpm.service rhrh-nginx116 -nginx116-nginx.service
+
+##在浏览器访问当前部署的机子的ip地址即可开始网页安装部署zabbix
+
+##zabbix-agent2，准备另一台电脑安装VMware ，新建虚拟机；配上zabbix.repo源；
+~# rpm -Uvh https://repo.zabbix.com/zabbix/5.0/rhel/7/x86_64/zabbix-release-5.0-1.el7.noarch.rpm
+~# yum clean all
+~# vi  /etc/yum.repos.d/zabbix.repo  %%将12行baseurl=后面的路径改成baseurl=https://mirrors.aliyun.com/zabbix/zabbix/5.0/rhel/7/$basearch/
+~# yum install zabbix-agent2 -y
+~#rpm -al zabbix-agent2                  %%关键查看/var/log/zabbix(日志)   /var/run/zabbix(运行路径)   /etc/zabbix/zabbix_agent2.conf(配置文件)
+~#vi  /etc/zabbix/zabbix_agent2.conf  
+##注意，AllowRoot 默认值为0，是否使用root身份运行zabbix,如果为0，并且是在root环境下，zabbix会尝试使用zabbix用户运行，如果不存在会告知zabbix用户不存在
+##HostMetadata 取值范围：0-255字节  仅用于主机主动注册功能，如果当前值为定义，那么它的值默认为HostMetadataItem的值。^
+##这个选项在2.2.2.0之后加入，并且确保支付不能超过限制，以及字符串必须是UTF8,否则服务器无法启动。
+~# vi /etc/zabbix/zabbix_agent2.conf   ##设置server = 192.168.189.133
+~# systemctl start zabbix-agent2
+~# netstat -lntup    ## -bash: netstat: 未找到命令   yum -y install net-tools -y
+~# netstat -lntup   ##显示tcp6       0      0 :::10050                :::*                    LISTEN      49289/zabbix_agent2
+~# systemctl status firewalld  ##显示防火墙
+~# systemctl stop firewalld
+~# systemctl diasble  firewalld
+~# getenforce        ##显示enforcing
+~# setenforce 0
